@@ -327,3 +327,50 @@ Scripts usados (en el repo, ver `Priorizaticket/`): `odoo_client.js` (cliente RP
 genérico), `diagnostico.js` / `inspeccionar_campos.js` (solo lectura),
 `aplicar_antiguedad_continua.js` (idempotente, es el que hizo el cambio),
 `verificar.js`. Snapshot del estado previo en `snapshots/v0.1-estado-antes-de-antiguedad-continua.md`.
+
+### Revisión de salud (2026-09-16) — antes de replicar a una segunda BD de pruebas
+
+Corrida con `revision_completa.js` (solo lectura). Todo en orden:
+
+- Cron activo, cada 30 min, sin errores.
+- Equipo sin score (ADMINISTRACION, id 13) no lo toca el cron — confirmado.
+- Tickets sin `x_motivo` caen a peso 0 sin romperse (no hay excepción, solo aportan
+  impacto+antigüedad al score).
+- Ninguna vista sigue referenciando el campo viejo `x_score` (huérfano, ver arriba).
+- `x_zona` sigue poblada al 95.8% (9046/9439), sin verse afectada por el cambio.
+- Rango de `x_score2` en tickets activos con score: 6–25 (n=515), sin negativos.
+- **Ticket de prueba 8908** (el usado en la validación original de punta a punta):
+  confirmado con `x_override=false` — ya estaba revertido, no quedó como pendiente.
+
+**Caso override probado en vivo y revertido sin dejar rastro** (ticket #10814):
+`x_override=true` + disparar cron → `score=999, priority='3', color=1`. Revertido a
+`false` + disparar cron → vuelve exacto a su estado original (`score=6, priority='1',
+color=0`). Confirma un comportamiento a tener presente (no es un bug, es el diseño
+desde el origen): **`x_score2` se recalcula al instante** (es un campo computado), pero
+**`priority`/`color` solo los actualiza el cron** — si alguien marca override a mano en
+un ticket real, las estrellas/rojo no cambian hasta la siguiente corrida del cron (hasta
+30 min después), aunque el score ya sea 999. Si se necesita reflejo inmediato en algún
+momento, la opción sería disparar el cron también desde un `on_change`/automation al
+guardar `x_override`, pero no se ha pedido y añadiría complejidad — queda anotado, no
+implementado.
+
+**No se puede verificar visualmente por este medio:** solo se cuenta con API key (RPC),
+no con la contraseña de login de la cuenta, y por política no se debe usar una
+contraseña para iniciar sesión en nombre del usuario. La verificación visual del
+kanban/lista (orden, rojo en override, estrellas) queda pendiente de que el usuario la
+confirme directamente en el navegador.
+
+**Siguiente paso decidido con el usuario:** no poblar `x_motivo`/`x_tipo_cliente` en
+esta BD de pruebas (eso se hace ya en producción). En su lugar: replicar este mismo
+setup a una **segunda BD de pruebas** (nueva, aún por crear) para probar el flujo de
+"aplicar de una base a otra" antes de tocar producción.
+
+**Ojo, corrección importante:** `aplicar_antiguedad_continua.js` **NO sirve tal cual**
+para una segunda BD nueva/vacía — asume que ya existen `x_motivo`, `x_impacto`,
+`x_peso_motivo`, `x_override`, `x_zona`, el cron id **131** y las vistas ids
+**9661/9662/9664**, todos hardcodeados para esta BD de pruebas específica. Si la segunda
+BD es un trial nuevo sin nada de eso, primero hay que correr el **script de replicación
+completo** (backlog #3, aún no escrito) que crea *todo* desde cero: los 8 campos base +
+el cron + las 3 vistas + antigüedad continua, de forma idempotente y con los IDs
+resueltos por búsqueda (no hardcodeados). Ese es el trabajo real que sigue antes de
+poder probar en la segunda base.
