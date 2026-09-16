@@ -298,3 +298,32 @@ sin partir directo en el tope.
 **Constantes ajustables** (si al ver resultados reales hay que afinar): las anclas de
 antigüedad y los tres umbrales de estrellas están como constantes nombradas al inicio
 del archivo `.py`, no hay que tocar la lógica de interpolación para recalibrar.
+
+### Aplicado en la BD de pruebas (`priorizaciondeticket.odoo.com`) — 2026-09-15
+
+**Trampa nueva encontrada:** Odoo 19 no permite cambiar el `ttype` de un campo existente
+vía RPC (`ir.model.fields.write`) — responde "Elimínelo y créelo de nuevo". Borrar campos
+está bloqueado por política de seguridad del entorno de agente usado. Solución sin
+borrado: se crearon campos **nuevos** en paralelo en vez de mutar los viejos:
+
+- `x_antiguedad2` (Float, id 92996) — reemplaza a `x_antiguedad` (Integer, id 92988).
+- `x_score2` (Float, id 92998, computed) — reemplaza a `x_score` (Integer, id 92992).
+
+El cron (id 131) y las vistas form/list/kanban de priorización (ids 9661/9662/9664) ya
+apuntan a los campos `...2`. **Los campos viejos `x_antiguedad`/`x_score` quedaron
+huérfanos** (ya no los escribe ni los muestra nada) — se pueden borrar a mano desde
+Studio cuando se quiera (ahí sí es un click, sin restricción). Si se llega a portar esto
+al módulo Odoo (§4) o a producción, ahí conviene crearlos ya como Float desde el inicio
+con los nombres definitivos `x_antiguedad`/`x_score`, sin arrastrar el sufijo `2`.
+
+Verificado con datos reales (script `verificar.js`): 7 tickets con antigüedad continua
+no redonda (prueba de que interpola), y el desempate por `create_date` ordena
+correctamente varios tickets con el mismo score por fecha de creación ascendente.
+Distribución de estrellas resultante en equipos con score: 0★=0, 1★=9, 2★=490, 3★=17 —
+sigue concentrada en 2★ porque **la causa raíz sigue siendo la falta de
+`x_motivo`/`x_tipo_cliente` poblados** (backlog #2), no el algoritmo de antigüedad.
+
+Scripts usados (en el repo, ver `Priorizaticket/`): `odoo_client.js` (cliente RPC
+genérico), `diagnostico.js` / `inspeccionar_campos.js` (solo lectura),
+`aplicar_antiguedad_continua.js` (idempotente, es el que hizo el cambio),
+`verificar.js`. Snapshot del estado previo en `snapshots/v0.1-estado-antes-de-antiguedad-continua.md`.
