@@ -244,7 +244,8 @@ def cron_recalcular_prioridad(self):
 1. **[Alto/Bajo]** ~~Antigüedad continua + desempate por fecha~~ — diseñado, ver §9.
    Falta aplicarlo en producción.
 2. **[Alto/Medio]** Poblar `x_tipo_cliente` (masivo) y `x_motivo` (en captura).
-3. **[Alto/Medio]** Script RPC idempotente de replicación a producción (Online).
+3. **[Alto/Medio]** ~~Script RPC idempotente de replicación a producción~~ — hecho y
+   validado en una segunda BD de pruebas, ver §10. Falta correrlo contra producción.
 4. **[Medio/Bajo]** ~~Recalibrar umbrales de estrellas~~ — diseñado, ver §9.
 5. **[Medio/Medio]** Sincronizar el módulo (5 correcciones) para el futuro sh.
 6. **[Medio/Alto]** Variable de plan/mensualidad (mapear, escalar, resolver solape).
@@ -374,3 +375,64 @@ completo** (backlog #3, aún no escrito) que crea *todo* desde cero: los 8 campo
 el cron + las 3 vistas + antigüedad continua, de forma idempotente y con los IDs
 resueltos por búsqueda (no hardcodeados). Ese es el trabajo real que sigue antes de
 poder probar en la segunda base.
+
+## 10. Script de replicación completo — construido y validado en segunda BD de pruebas
+
+`replicar_configuracion.js` reemplaza a `aplicar_antiguedad_continua.js` como la
+herramienta de referencia: crea **todo desde cero** en cualquier BD de Odoo Online con
+Helpdesk instalado, de forma idempotente (se puede correr varias veces sin duplicar
+nada). A diferencia del intento anterior en la primera BD, aquí `x_antiguedad` y
+`x_score` se crean **directamente como Float** con sus nombres definitivos — no hace
+falta el sufijo `2`, porque no hay ningún campo Integer previo con el que chocar.
+
+**Uso:** `node replicar_configuracion.js <archivo-de-config-sin-.js>` (ej.
+`config.local2`). Resuelve modelos y vistas base por **xmlid** vía `ir.model.data`
+(`helpdesk.model_helpdesk_ticket`, `helpdesk.helpdesk_ticket_view_form`,
+`helpdesk.helpdesk_tickets_view_tree`, `helpdesk.helpdesk_ticket_view_kanban`,
+`base.view_partner_form`), no por ids crudos — por eso sirve igual en cualquier BD, no
+solo en la que se usó para construirlo.
+
+**Qué crea:**
+1. `res.partner.x_tipo_cliente` (Selection, 3 opciones)
+2. `helpdesk.ticket.x_motivo` (Selection, 14 opciones)
+3. `helpdesk.ticket.x_impacto` (Integer, computed)
+4. `helpdesk.ticket.x_peso_motivo` (Integer, computed)
+5. `helpdesk.ticket.x_antiguedad` (**Float**, manual)
+6. `helpdesk.ticket.x_override` (Boolean)
+7. `helpdesk.ticket.x_score` (**Float**, computed) — ya con antigüedad continua
+8. `helpdesk.ticket.x_zona` (Selection, related a `partner_id.x_studio_zona`)
+9. Cron "Priorizacion - recalcular antiguedad y score" (30 min, ya con interpolación +
+   umbrales recalibrados 18/11/5)
+10. 4 vistas heredadas: form de contacto (con la corrección de posición/label ya
+    incluida), form/list/kanban de ticket (list y kanban con
+    `default_order="x_score desc, create_date asc"`, list con `decoration-danger` y
+    columna `x_zona` opcional)
+
+**Trampa nueva encontrada:** el campo `numbercall` de `ir.cron` ya no existe en Odoo 19
+(edición anterior de Odoo Online tenía ese campo; en esta versión los cron simplemente
+se repiten solos). El script ya está corregido sin ese campo.
+
+**Validado en segunda BD de pruebas** (`priorizaciondeticket2.odoo.com`, otro trial con
+los mismos ~9,480 tickets reales pero sin ninguna configuración previa) — corrida
+completa **sin errores**:
+- Los 8 campos + cron + 4 vistas creados de cero.
+- 519 tickets activos en equipos con score; 15 con antigüedad continua no redonda.
+- Equipo ADMINISTRACION intacto (0 tickets tocados).
+- Prueba override de punta a punta (marcar → cron → 999/3★/rojo → revertir → cron →
+  vuelve exacto a su estado original) sin dejar rastro.
+- Distribución de estrellas con `x_motivo` vacío (no se va a poblar aquí, ver abajo):
+  0★=13, 1★=12, 2★=494, 3★=0 — coherente con que casi todo depende solo de antigüedad
+  sin datos de motivo/tipo de cliente.
+
+**Decisión del usuario:** no poblar `x_motivo`/`x_tipo_cliente` en ninguna BD de
+pruebas — esa población se hará directamente en producción cuando se llegue ahí. El
+propósito de esta segunda BD era exclusivamente probar que el script de replicación
+funciona limpio de principio a fin en una base distinta a la original, antes de
+correrlo contra producción.
+
+**Siguiente paso natural:** correr `replicar_configuracion.js` contra producción
+(`erp.rehedmas.com`, ver `config.js` en la raíz del repo `rehedmex-code` para el patrón
+de credenciales — hay que armar un `config.local.js` propio con esas credenciales, no
+reusar el de las BDs de prueba). Antes de eso, confirmar con el usuario que sí se quiere
+proceder contra producción real (tickets y datos de clientes reales, no descartables
+como los de un trial).

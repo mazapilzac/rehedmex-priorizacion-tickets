@@ -3,3 +3,4 @@ __pycache__/
 .env
 node_modules/
 config.local.js
+config.local2.js
