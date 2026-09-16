@@ -1,7 +1,7 @@
 const xmlrpc = require('xmlrpc');
 
 class OdooClient {
-  constructor({ url, db, username, apiKey }) {
+  constructor({ url, db, username, apiKey, uid }) {
     const parsed = new URL(url);
     const clientOpts = { host: parsed.hostname, port: parsed.port || 443, path: '' };
     this._common = xmlrpc.createSecureClient({ ...clientOpts, path: '/xmlrpc/2/common' });
@@ -9,7 +9,7 @@ class OdooClient {
     this._db = db;
     this._username = username;
     this._apiKey = apiKey;
-    this._uid = null;
+    this._uid = uid || null;
   }
 
   _call(client, method, params) {

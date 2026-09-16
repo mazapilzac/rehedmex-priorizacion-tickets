@@ -1,6 +1,9 @@
 // Diagnóstico de solo lectura: revisa qué tanto de la config de priorización
-// ya existe en la instancia de pruebas antes de tocar nada.
-const config = require('./config.local');
+// ya existe en una instancia antes de tocar nada.
+// Uso: node diagnostico.js [archivo-de-config-sin-.js]  (default: config.local)
+const path = require('path');
+const configFile = process.argv[2] || 'config.local';
+const config = require(path.resolve(__dirname, configFile));
 const OdooClient = require('./odoo_client');
 
 const CAMPOS_ESPERADOS = [

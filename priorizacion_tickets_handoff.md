@@ -436,3 +436,45 @@ de credenciales — hay que armar un `config.local.js` propio con esas credencia
 reusar el de las BDs de prueba). Antes de eso, confirmar con el usuario que sí se quiere
 proceder contra producción real (tickets y datos de clientes reales, no descartables
 como los de un trial).
+
+## 11. Implementado en producción (`erp.rehedmas.com`) — 2026-09-16
+
+Con el visto bueno explícito del usuario tras revisar la segunda BD de pruebas, se
+corrió `replicar_configuracion.js` contra producción.
+
+**Trampa nueva encontrada:** el flujo de autenticación por `common.authenticate(db,
+usuario, api_key)` que usa `odoo_client.js` **no funcionó contra producción**
+(respondía "Autenticación fallida") aunque las credenciales eran correctas — se
+confirmó probando esas mismas credenciales con el cliente RPC ya existente del proyecto
+Syscom (`../odoo.js`), que usa un **uid fijo conocido** en vez de autenticar por
+usuario/contraseña, y sí funcionó. Se corrigió `odoo_client.js` para aceptar un `uid`
+opcional en la config y saltarse `common.authenticate` cuando ya se conoce (ver
+`config.produccion.js`, gitignored, con `uid: 6` igual que en `rehedmex-code/config.js`
+de la raíz). Queda documentado por si se repite en otra instancia.
+
+**Diagnóstico previo:** producción estaba completamente limpia (0 de los 8 campos, sin
+cron, sin vistas) — no había ningún resto de configuración previa que chocara.
+
+**Resultado de la replicación: sin errores** (el único mensaje en consola, "Job already
+executing", fue benigno — el cron recién creado se autoejecutó por su cuenta casi al
+mismo tiempo que se intentó dispararlo a mano; no fue una falla, solo una carrera entre
+dos disparos del mismo cron).
+
+**Revisión de salud post-implementación** (`revision_salud.js config.produccion`, solo
+lectura, sin escribir nada — se decidió **no** repetir la prueba en vivo de override
+sobre un ticket real de producción, ya validada dos veces en las BDs de pruebas):
+
+- Cron activo cada 30 min.
+- ADMINISTRACION intacto (0 tickets tocados).
+- 519 tickets activos en equipos con score; 511 ya con `x_antiguedad` recalculada.
+- `x_zona` poblada al 95.9% (9091/9484).
+- Rango de `x_score`: 1–15. Distribución de estrellas: 0★=13, 1★=12, 2★=494, 3★=0 —
+  igual de concentrada que en la segunda BD de pruebas, por la misma razón: sin
+  `x_motivo`/`x_tipo_cliente` poblados todavía.
+
+**Estado del proyecto:** el modelo de priorización (antigüedad continua, desempate por
+fecha, umbrales recalibrados) está **en producción, funcionando, sin errores**. El único
+paso que falta para que el score deje de estar dominado casi solo por antigüedad es
+**poblar `x_motivo` y `x_tipo_cliente`** con datos reales — que es justo la decisión que
+tomó el usuario de dejar para hacerse directamente aquí, en producción, ahora que la
+mecánica ya está probada. Ese es el siguiente backlog real (antes #2).

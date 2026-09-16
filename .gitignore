@@ -4,3 +4,4 @@ __pycache__/
 node_modules/
 config.local.js
 config.local2.js
+config.produccion.js
